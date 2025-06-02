@@ -59,15 +59,15 @@ test_umka_simple_program :: proc(t: ^testing.T) {
 
 	// Set parameters for the add function (4 + 6 = 10)
 	param0 := cast([^]umka.UmkaStackSlot)fn_context.params
-	umka.umka_stack_slot_set_int(&param0[0], 4)
-	umka.umka_stack_slot_set_int(&param0[1], 6)
+	umka.umka_stack_slot_set(&param0[0], 4)
+	umka.umka_stack_slot_set(&param0[1], 6)
 
 	// Call the function using umkaCall
 	call_result := umka.umkaCall(instance, &fn_context)
 	testing.expect(t, call_result == 0, "umkaCall should return 0 on success")
 
 	// Get the result from the function context
-	result_value := umka.umka_stack_slot_get_int(fn_context.result)
+	result_value := umka.umka_stack_slot_get(fn_context.result, int)
 	testing.expect(
 		t,
 		result_value == 10,
@@ -128,37 +128,37 @@ test_umka_stack_slot_helpers :: proc(t: ^testing.T) {
 	slot: umka.UmkaStackSlot
 
 	// Test integer operations
-	umka.umka_stack_slot_set_int(&slot, 12345)
-	int_val := umka.umka_stack_slot_get_int(&slot)
+	umka.umka_stack_slot_set(&slot, 12345)
+	int_val := umka.umka_stack_slot_get(&slot, int)
 	testing.expect(t, int_val == 12345, fmt.tprintf("Expected 12345, got %d", int_val))
 
 	// Test unsigned integer operations
-	umka.umka_stack_slot_set_uint(&slot, 67890)
-	uint_val := umka.umka_stack_slot_get_uint(&slot)
+	umka.umka_stack_slot_set(&slot, 67890)
+	uint_val := umka.umka_stack_slot_get(&slot, uint)
 	testing.expect(t, uint_val == 67890, fmt.tprintf("Expected 67890, got %d", uint_val))
 
 	// Test real number operations
-	umka.umka_stack_slot_set_real(&slot, 3.14159)
-	real_val := umka.umka_stack_slot_get_real(&slot)
+	umka.umka_stack_slot_set(&slot, 3.14159)
+	real_val := umka.umka_stack_slot_get(&slot, f64)
 	testing.expect(
 		t,
 		abs(real_val - 3.14159) < 0.00001,
 		fmt.tprintf("Expected ~3.14159, got %f", real_val),
 	)
 
-	// Test 32-bit real operations
-	umka.umka_stack_slot_set_real32(&slot, 2.718)
-	real32_val := umka.umka_stack_slot_get_real32(&slot)
+	// Test 64-bit real operations
+	umka.umka_stack_slot_set(&slot, 2.718)
+	real64_val := umka.umka_stack_slot_get(&slot, f64)
 	testing.expect(
 		t,
-		abs(f64(real32_val) - 2.718) < 0.001,
-		fmt.tprintf("Expected ~2.718, got %f", real32_val),
+		abs(real64_val - 2.718) < 0.001,
+		fmt.tprintf("Expected ~2.718, got %f", real64_val),
 	)
 
 	// Test pointer operations
 	test_ptr := rawptr(uintptr(0x12345678))
-	umka.umka_stack_slot_set_ptr(&slot, test_ptr)
-	ptr_val := umka.umka_stack_slot_get_ptr(&slot)
+	umka.umka_stack_slot_set(&slot, test_ptr)
+	ptr_val := umka.umka_stack_slot_get(&slot, rawptr)
 	testing.expect(t, ptr_val == test_ptr, "Pointer values should match")
 }
 
@@ -202,8 +202,8 @@ test_umka_string_functions :: proc(t: ^testing.T) {
 test_extern_func :: proc "c" (params: ^umka.UmkaStackSlot, result: ^umka.UmkaStackSlot) {
 	context = runtime.default_context()
 	if params != nil && result != nil {
-		input_val := umka.umka_stack_slot_get_int(params)
-		umka.umka_stack_slot_set_int(result, input_val * 2)
+		input_val := umka.umka_stack_slot_get(params, int)
+		umka.umka_stack_slot_set(result, input_val * 2)
 	}
 }
 
@@ -236,11 +236,11 @@ test_umka_add_external_function :: proc(t: ^testing.T) {
 	)
 
 	param0 := cast([^]umka.UmkaStackSlot)fn_context.params
-	umka.umka_stack_slot_set_int(&param0[0], 42) // Set input value to 42
+	umka.umka_stack_slot_set(&param0[0], 42) // Set input value to 42
 	call_result := umka.umkaCall(instance, &fn_context)
 	testing.expect(t, call_result == 0, "umkaCall should return 0 on success")
 
-	result_value := umka.umka_stack_slot_get_int(fn_context.result)
+	result_value := umka.umka_stack_slot_get(fn_context.result, int)
 	testing.expect(
 		t,
 		result_value == 84,
@@ -334,7 +334,7 @@ test_umka_add_module :: proc(t: ^testing.T) {
 	// Call the helper function
 	call_result := umka.umkaCall(instance, &fn_context)
 	testing.expect(t, call_result == 0, "umkaCall should return 0 on success")
-	result_value := umka.umka_stack_slot_get_int(fn_context.result)
+	result_value := umka.umka_stack_slot_get(fn_context.result, int)
 	testing.expect(
 		t,
 		result_value == 42,
@@ -373,7 +373,7 @@ test_umka_hooks :: proc(t: ^testing.T) {
 	call_result := umka.umkaCall(instance, &fn_context)
 	testing.expect(t, call_result == 0, "umkaCall should return 0 on success")
 
-	result_value := umka.umka_stack_slot_get_int(fn_context.result)
+	result_value := umka.umka_stack_slot_get(fn_context.result, int)
 	testing.expect(t, result_value == 21, "Expected function result 21 from helper")
 
 

@@ -207,11 +207,11 @@ umkaGetResult :: proc(params: ^UmkaStackSlot, result: ^UmkaStackSlot) -> ^UmkaSt
 
 		offset := firstSlotIndex[paramLayout.numParams - 1]
 		resultPtr := cast(^rawptr)(cast(uintptr)params + uintptr(offset * size_of(UmkaStackSlot)))
-		umka_stack_slot_set_ptr(result, resultPtr^)
+		umka_stack_slot_set(result, resultPtr^)
 	}
 	return result
 }
 
 umkaGetInstance :: proc(result: ^UmkaStackSlot) -> rawptr {
-	return umka_stack_slot_get_ptr(result)
+	return umka_stack_slot_get(result, rawptr)
 }
