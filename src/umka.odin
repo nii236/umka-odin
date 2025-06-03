@@ -11,61 +11,14 @@ when ODIN_OS == .Darwin && ODIN_ARCH == .amd64 {foreign import umkalib "../lib/m
 when ODIN_OS ==
 	.Darwin && ODIN_ARCH == .arm64 {foreign import umkalib "../lib/macos-arm64/libumka.a"}
 
-// Stack slot union equivalent
-UmkaStackSlot :: struct {
-	data: [8]u8, // Union data - 8 bytes to hold the largest member
+// Stack slot union matching C API
+UmkaStackSlot :: union {
+	i64,
+	u64,
+	rawptr,
+	f64,
+	f32,
 }
-
-// Generic helper procedures to access union members
-umka_stack_slot_set :: proc(slot: ^UmkaStackSlot, val: $T) {
-	(cast(^T)&slot.data[0])^ = val
-}
-
-umka_stack_slot_get :: proc(slot: ^UmkaStackSlot, $T: typeid) -> T {
-	return (cast(^T)&slot.data[0])^
-}
-
-// // Convenience wrappers that maintain API compatibility
-// umka_stack_slot_set_int :: proc(slot: ^UmkaStackSlot, val: i64) {
-// 	umka_stack_slot_set(slot, val)
-// }
-
-// umka_stack_slot_get_int :: proc(slot: ^UmkaStackSlot) -> i64 {
-// 	return umka_stack_slot_get(slot, i64)
-// }
-
-// umka_stack_slot_set_uint :: proc(slot: ^UmkaStackSlot, val: u64) {
-// 	umka_stack_slot_set(slot, val)
-// }
-
-// umka_stack_slot_get_uint :: proc(slot: ^UmkaStackSlot) -> u64 {
-// 	return umka_stack_slot_get(slot, u64)
-// }
-
-// umka_stack_slot_set_ptr :: proc(slot: ^UmkaStackSlot, val: rawptr) {
-// 	umka_stack_slot_set(slot, val)
-// }
-
-// umka_stack_slot_get_ptr :: proc(slot: ^UmkaStackSlot) -> rawptr {
-// 	return umka_stack_slot_get(slot, rawptr)
-// }
-
-// umka_stack_slot_set_real :: proc(slot: ^UmkaStackSlot, val: f64) {
-// 	umka_stack_slot_set(slot, val)
-// }
-
-// umka_stack_slot_get_real :: proc(slot: ^UmkaStackSlot) -> f64 {
-// 	return umka_stack_slot_get(slot, f64)
-// }
-
-// umka_stack_slot_set_real32 :: proc(slot: ^UmkaStackSlot, val: f32) {
-// 	umka_stack_slot_set(slot, val)
-// }
-
-// umka_stack_slot_get_real32 :: proc(slot: ^UmkaStackSlot) -> f32 {
-// 	return umka_stack_slot_get(slot, f32)
-// }
-
 // Function context structure
 UmkaFuncContext :: struct {
 	entryOffset: i64,
@@ -159,59 +112,4 @@ foreign umkalib {
 	umkaGetVersion :: proc() -> cstring ---
 	umkaGetMemUsage :: proc(umka: rawptr) -> i64 ---
 	umkaMakeFuncContext :: proc(umka: rawptr, closureType: rawptr, entryOffset: c.int, fn: ^UmkaFuncContext) ---
-}
-
-
-umkaGetParam :: proc(params: ^UmkaStackSlot, index: c.longlong) -> ^UmkaStackSlot {
-	// Access the parameter layout at params[-4]
-	paramLayoutPtr := cast(^rawptr)(cast(uintptr)params - 4 * size_of(UmkaStackSlot))
-	paramLayout := cast(^UmkaExternalCallParamLayout)paramLayoutPtr^
-
-	if index < 0 || index >= paramLayout.numParams - paramLayout.numResultParams - 1 {
-		return nil
-	}
-
-	// Access firstSlotIndex array through pointer arithmetic
-	firstSlotIndexPtr := cast(^i64)(cast(uintptr)paramLayout +
-		size_of(UmkaExternalCallParamLayout))
-	firstSlotIndex := cast([^]i64)firstSlotIndexPtr
-
-	offset := firstSlotIndex[index + 1] // + 1 to skip upvalues
-	return cast(^UmkaStackSlot)(cast(uintptr)params + uintptr(offset * size_of(UmkaStackSlot)))
-}
-
-umkaGetUpvalue :: proc(params: ^UmkaStackSlot) -> ^UmkaAny {
-	// Access the parameter layout at params[-4]
-	paramLayoutPtr := cast(^rawptr)(cast(uintptr)params - 4 * size_of(UmkaStackSlot))
-	paramLayout := cast(^UmkaExternalCallParamLayout)paramLayoutPtr^
-
-	// Access firstSlotIndex array through pointer arithmetic
-	firstSlotIndexPtr := cast(^i64)(cast(uintptr)paramLayout +
-		size_of(UmkaExternalCallParamLayout))
-	firstSlotIndex := cast([^]i64)firstSlotIndexPtr
-
-	offset := firstSlotIndex[0]
-	return cast(^UmkaAny)(cast(uintptr)params + uintptr(offset * size_of(UmkaStackSlot)))
-}
-
-umkaGetResult :: proc(params: ^UmkaStackSlot, result: ^UmkaStackSlot) -> ^UmkaStackSlot {
-	// Access the parameter layout at params[-4]
-	paramLayoutPtr := cast(^rawptr)(cast(uintptr)params - 4 * size_of(UmkaStackSlot))
-	paramLayout := cast(^UmkaExternalCallParamLayout)paramLayoutPtr^
-
-	if paramLayout.numResultParams == 1 {
-		// Access firstSlotIndex array through pointer arithmetic
-		firstSlotIndexPtr := cast(^i64)(cast(uintptr)paramLayout +
-			size_of(UmkaExternalCallParamLayout))
-		firstSlotIndex := cast([^]i64)firstSlotIndexPtr
-
-		offset := firstSlotIndex[paramLayout.numParams - 1]
-		resultPtr := cast(^rawptr)(cast(uintptr)params + uintptr(offset * size_of(UmkaStackSlot)))
-		umka_stack_slot_set(result, resultPtr^)
-	}
-	return result
-}
-
-umkaGetInstance :: proc(result: ^UmkaStackSlot) -> rawptr {
-	return umka_stack_slot_get(result, rawptr)
 }
