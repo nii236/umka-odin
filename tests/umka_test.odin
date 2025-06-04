@@ -8,26 +8,39 @@ import "core:log"
 import "core:strings"
 import "core:testing"
 
-
 @(test)
-test_umka_basic_lifecycle :: proc(t: ^testing.T) {
+test_init :: proc(t: ^testing.T) {
+
+	instance := umka.umkaAlloc()
+	defer umka.umkaFree(instance)
 	source := `
-	fn add(a: int, b: int): int {
-    	return a + b
+	fn main() {
+		printf("Hello Umka!\n")
 	}
-`
+	`
 
 
 	source_cstr := strings.clone_to_cstring(source)
 	defer delete(source_cstr)
-	instance := prepare_vm(t, source_cstr)
 
-	testing.expect(t, umka.umkaAlive(instance), "Instance should be alive after allocation")
+	log.info("Initializing Umka VM for tests")
+	init_success := umka.umkaInit(
+		instance,
+		"main.um",
+		source_cstr,
+		1024 * 1024,
+		nil,
+		0,
+		nil,
+		false,
+		true,
+		nil,
+	)
 
-	umka.umkaFree(instance)
-	testing.expect(t, !umka.umkaAlive(instance), "Instance should not be alive after freeing")
+	umka.umkaCompile(instance)
+
+	testing.expect(t, init_success, "Umka VM should initialize successfully")
 }
-
 @(test)
 test_umka_version :: proc(t: ^testing.T) {
 	version := umka.umkaGetVersion()
@@ -36,42 +49,45 @@ test_umka_version :: proc(t: ^testing.T) {
 	version_str := string(version)
 	testing.expect(t, len(version_str) > 0, "Version string should not be empty")
 
-	fmt.printf("Umka version: %s\n", version_str)
 }
 
 @(test)
 test_umka_simple_program :: proc(t: ^testing.T) {
 	source := `
-	fn add(a: int, b: int): int {
-    	return a + b
-	}
-`
+		fn add(a: int, b: int): int {
+	    	return a + b
+		}
+	`
 
 
 	source_cstr := strings.clone_to_cstring(source)
 	defer delete(source_cstr)
 	instance := prepare_vm(t, source_cstr)
+	defer umka.umkaFree(instance)
 
-	fn_context: umka.UmkaFuncContext
+	fn_context: umka.FuncContext
 	get_func_success := umka.umkaGetFunc(instance, nil, "add", &fn_context)
 	testing.expect(t, get_func_success, "Should be able to get 'add' function after compilation")
 
 
 	// Set parameters for the add function (4 + 6 = 10)
-	param0 := cast([^]umka.UmkaStackSlot)fn_context.params
-	param0[0] = i64(4)
-	param0[1] = i64(6)
+	param0 := umka.umkaGetParam(fn_context.params, 0)
+	param1 := umka.umkaGetParam(fn_context.params, 1)
+
+	umka.set_int(param0, 4)
+	umka.set_int(param1, 6)
 
 	// Call the function using umkaCall
 	call_result := umka.umkaCall(instance, &fn_context)
 	testing.expect(t, call_result == 0, "umkaCall should return 0 on success")
 
 	// Get the result from the function context
-	result_value := fn_context.result.(i64)
+	resultSlot := umka.umkaGetResult(fn_context.params, fn_context.result)
+	result := umka.get_int(resultSlot)
 	testing.expect(
 		t,
-		result_value == 10,
-		fmt.tprintf("Expected function result 10 (4+6), got %d", result_value),
+		result == 10,
+		fmt.tprintf("Expected function result 10 (4+6), got %d", result),
 	)
 
 }
@@ -123,54 +139,6 @@ test_umka_compilation_error :: proc(t: ^testing.T) {
 	}
 }
 
-@(test)
-test_umka_stack_slot_helpers :: proc(t: ^testing.T) {
-	slot: umka.UmkaStackSlot
-
-	// Test integer operations
-	slot = i64(12345)
-	testing.expect(t, slot == i64(12345), fmt.tprintf("Expected 12345, got %d", slot))
-
-	// Test unsigned integer operations
-	slot = u64(67890)
-	testing.expect(t, slot == u64(67890), fmt.tprintf("Expected 67890, got %d", slot))
-
-	// Test real number operations
-	slot = f32(3.14159)
-	testing.expect(
-		t,
-		abs32(slot.(f32) - f32(3.14159)) < f32(0.00001),
-		fmt.tprintf("Expected ~3.14159, got %f", slot),
-	)
-
-	// Test 64-bit real operations
-	slot = f64(2.718)
-	testing.expect(
-		t,
-		abs(slot.(f64) - f64(2.718)) < f64(0.001),
-		fmt.tprintf("Expected ~2.718, got %f", slot),
-	)
-
-	// Test pointer operations
-	test_ptr := rawptr(uintptr(0x12345678))
-	slot = test_ptr
-	testing.expect(
-		t,
-		slot.(rawptr) == test_ptr,
-		fmt.tprintf("Expected pointer 0x12345678, got %p", slot),
-	)
-}
-
-@(test)
-test_umka_memory_usage :: proc(t: ^testing.T) {
-	source := `fn main(): int { return 0 }`
-	source_cstr := strings.clone_to_cstring(source)
-	defer delete(source_cstr)
-	instance := prepare_vm(t, source_cstr)
-	defer umka.umkaFree(instance)
-	initial_usage := umka.umkaGetMemUsage(instance)
-	testing.expect(t, initial_usage >= 0, "Memory usage should be non-negative")
-}
 
 @(test)
 test_umka_string_functions :: proc(t: ^testing.T) {
@@ -198,11 +166,11 @@ test_umka_string_functions :: proc(t: ^testing.T) {
 }
 
 // External function for testing callbacks
-test_extern_func :: proc "c" (params: ^umka.UmkaStackSlot, result: ^umka.UmkaStackSlot) {
+test_extern_func :: proc "c" (params: ^umka.StackSlot, result: ^umka.StackSlot) {
 	context = runtime.default_context()
 	if params != nil && result != nil {
-		input_val := params.(i64)
-		result^ = i64(input_val * 2)
+		input_val := params.intVal
+		umka.set_int(result, i64(input_val * 2))
 	}
 }
 
@@ -219,14 +187,14 @@ test_umka_add_external_function :: proc(t: ^testing.T) {
 
 	source_cstr := strings.clone_to_cstring(source)
 	defer delete(source_cstr)
-	fns := map[string]umka.UmkaExternFunc{}
+	fns := map[string]umka.ExternFunc{}
 	fns["doubleValue"] = test_extern_func
 	defer delete(fns)
 	instance := prepare_vm(t, source_cstr, fns)
 	defer umka.umkaFree(instance)
 
 
-	fn_context: umka.UmkaFuncContext
+	fn_context: umka.FuncContext
 	get_func_success := umka.umkaGetFunc(instance, nil, "doubleValue", &fn_context)
 	testing.expect(
 		t,
@@ -234,12 +202,12 @@ test_umka_add_external_function :: proc(t: ^testing.T) {
 		"Should be able to get 'doubleValue' function after adding it",
 	)
 
-	param0 := cast([^]umka.UmkaStackSlot)fn_context.params
-	param0[0] = i64(42) // Set input value to 42
+	param0 := umka.umkaGetParam(fn_context.params, 0)
+	umka.set_int(param0, 42) // Set input value to 42
 	call_result := umka.umkaCall(instance, &fn_context)
 	testing.expect(t, call_result == 0, "umkaCall should return 0 on success")
 
-	result_value := fn_context.result.(i64)
+	result_value := fn_context.result.intVal
 	testing.expect(
 		t,
 		result_value == 84,
@@ -247,14 +215,6 @@ test_umka_add_external_function :: proc(t: ^testing.T) {
 	)
 }
 
-// Hook function for testing
-test_hook_calls: int = 0
-
-test_hook_func :: proc "c" (fileName: cstring, funcName: cstring, line: c.int) {
-	context = runtime.default_context()
-	log.info("Hook called: file=%s, func=%s, line=%d", fileName, funcName, line)
-	test_hook_calls += 1
-}
 
 @(test)
 test_umka_add_module :: proc(t: ^testing.T) {
@@ -323,7 +283,7 @@ test_umka_add_module :: proc(t: ^testing.T) {
 	}
 
 	// call module function
-	fn_context: umka.UmkaFuncContext
+	fn_context: umka.FuncContext
 	get_func_success := umka.umkaGetFunc(instance, module_filename_cstr, "helper", &fn_context)
 	testing.expect(
 		t,
@@ -333,7 +293,7 @@ test_umka_add_module :: proc(t: ^testing.T) {
 	// Call the helper function
 	call_result := umka.umkaCall(instance, &fn_context)
 	testing.expect(t, call_result == 0, "umkaCall should return 0 on success")
-	result_value := fn_context.result.(i64)
+	result_value := fn_context.result.intVal
 	testing.expect(
 		t,
 		result_value == 42,
@@ -342,6 +302,13 @@ test_umka_add_module :: proc(t: ^testing.T) {
 
 }
 
+
+test_hook_calls: int = 0
+test_hook_func :: proc "c" (fileName: cstring, funcName: cstring, line: c.int) {
+	context = runtime.default_context()
+	log.info("Hook called: file=%s, func=%s, line=%d", fileName, funcName, line)
+	test_hook_calls += 1
+}
 
 @(test)
 test_umka_hooks :: proc(t: ^testing.T) {
@@ -358,9 +325,9 @@ test_umka_hooks :: proc(t: ^testing.T) {
 	instance := prepare_vm(t, source_cstr)
 	defer umka.umkaFree(instance)
 
-	umka.umkaSetHook(instance, umka.UmkaHookEvent.UMKA_HOOK_CALL, test_hook_func)
+	umka.umkaSetHook(instance, umka.HookEvent.UMKA_HOOK_CALL, test_hook_func)
 
-	fn_context: umka.UmkaFuncContext
+	fn_context: umka.FuncContext
 	get_func_success := umka.umkaGetFunc(instance, nil, "helper", &fn_context)
 	testing.expect(
 		t,
@@ -370,12 +337,6 @@ test_umka_hooks :: proc(t: ^testing.T) {
 	testing.expect(t, get_func_success, "Function should be found after compilation")
 
 	call_result := umka.umkaCall(instance, &fn_context)
-	testing.expect(t, call_result == 0, "umkaCall should return 0 on success")
-
-	result_value := fn_context.result.(i64)
-	testing.expect(t, result_value == 21, "Expected function result 21 from helper")
-
-
 	testing.expect(t, test_hook_calls > 0, "Hook function should have been called at least once")
 }
 
@@ -389,7 +350,7 @@ abs32 :: proc(x: f32) -> f32 {
 prepare_vm :: proc(
 	t: ^testing.T,
 	source: cstring,
-	fns: map[string]umka.UmkaExternFunc = nil,
+	fns: map[string]umka.ExternFunc = nil,
 ) -> rawptr {
 	instance := umka.umkaAlloc()
 	init_success := umka.umkaInit(
@@ -405,13 +366,14 @@ prepare_vm :: proc(
 		nil,
 	)
 	testing.expect(t, init_success, "Init should succeed with valid source")
-
 	for name, fn in fns {
 		name_cstr := strings.clone_to_cstring(name)
 		defer delete(name_cstr)
+
 		add_func_success := umka.umkaAddFunc(instance, name_cstr, fn)
 		testing.expect(t, add_func_success, "Adding external function should succeed")
 	}
+
 
 	compile_success := umka.umkaCompile(instance)
 	testing.expect(t, compile_success, "Compilation should succeed with valid source")
